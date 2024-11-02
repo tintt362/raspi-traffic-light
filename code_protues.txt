@@ -1,0 +1,100 @@
+import time
+import threading
+import RPi.GPIO as GPIO
+
+GPIO.setmode(GPIO.BOARD)
+GPIO.setwarnings(False)
+
+bcd1_pins = [3, 5, 7, 11]  
+bcd2_pins = [21, 23, 24, 26]  
+
+digit1 = 13 
+digit2 = 15 
+digit3 = 16  
+digit4 = 18  
+
+d1, v1, x1 = 29, 31, 32  # Ðèn d?, vàng, xanh cho c?t 1
+d2, v2, x2 = 33, 36, 35  # Ðèn d?, vàng, xanh cho c?t 2
+
+# Thi?t l?p các chân cho các LED 7 thanh và dèn giao thông
+for pin in bcd1_pins + bcd2_pins + [digit1, digit2, digit3, digit4, d1, v1, x1, d2, v2, x2]:
+    GPIO.setup(pin, GPIO.OUT)
+
+def display_digit(digit, digit_pin, bcd_pins):
+    bcd_values = [(int(digit) >> i) & 1 for i in range(4)]
+    for i in range(4):
+        GPIO.output(bcd_pins[i], bcd_values[i])
+    GPIO.output(digit_pin, GPIO.HIGH)
+    time.sleep(0.001)
+    GPIO.output(digit_pin, GPIO.LOW)
+
+def display_number(number, digit_pins, bcd_pins):
+    tens = number // 10
+    ones = number % 10
+    display_digit(tens, digit_pins[0], bcd_pins)  
+    display_digit(ones, digit_pins[1], bcd_pins)  
+
+def led_display_thread_1():
+    while True:
+        display_number(t1, [digit2, digit1], bcd1_pins)
+
+def led_display_thread_2():
+    while True:
+        display_number(t2, [digit4, digit3], bcd2_pins)
+
+def control_traffic_lights(t):
+    # Ði?u khi?n dèn giao thông cho các c?t
+    if 0 <= t < 15:  # C?t 1 xanh, C?t 2 d?
+        GPIO.output(x1, GPIO.LOW); GPIO.output(v1, GPIO.LOW); GPIO.output(d1, GPIO.HIGH)
+        if 0 <= t < 10:  # C?t 2 dèn d? trong 10 giây
+            GPIO.output(x2, GPIO.HIGH); GPIO.output(v2, GPIO.LOW); GPIO.output(d2, GPIO.LOW)
+        elif 10 <= t < 15:  # C?t 2 dèn vàng trong 5 giây
+            GPIO.output(d2, GPIO.LOW); GPIO.output(v2, GPIO.HIGH); GPIO.output(x2, GPIO.LOW)
+            
+    elif 15 <= t < 30:  # C?t 1 d?, C?t 2 xanh
+        GPIO.output(x2, GPIO.LOW); GPIO.output(v2, GPIO.LOW); GPIO.output(d2, GPIO.HIGH)
+        if 15 <= t < 25:  # C?t 1 dèn d? trong 10 giây
+            GPIO.output(x1, GPIO.HIGH); GPIO.output(v1, GPIO.LOW); GPIO.output(d1, GPIO.LOW)
+        elif 25 <= t < 30:  # C?t 1 dèn vàng trong 5 giây
+            GPIO.output(d1, GPIO.LOW); GPIO.output(v1, GPIO.HIGH); GPIO.output(x1, GPIO.LOW)
+
+def update_time_thread():
+    global t1, t2
+    t = 0
+    past_time = time.time()
+    
+    while True:
+        current_time = time.time()
+        if current_time - past_time >= 1:
+            t += 1
+            if t >= 30:  # Reset chu k? sau 30 giây
+                t = 0
+            past_time = current_time
+
+            # C?p nh?t giá tr? d?m ngu?c t1 và t2
+            if 0 <= t < 15:  # C?t 1 xanh d?m ngu?c, C?t 2 d? d?m ngu?c
+                t1 = 15 - t
+                t2 = 10 - t if t < 10 else 15 - t  # C?t 2: 10 giây d?, 5 giây vàng
+            elif 15 <= t < 30:  # C?t 2 xanh d?m ngu?c, C?t 1 d? d?m ngu?c
+                t2 = 30 - t
+                t1 = 25 - t if t < 25 else 30 - t  # C?t 1: 10 giây d?, 5 giây vàng
+
+            control_traffic_lights(t)
+
+try:
+    t1, t2 = 0, 0
+
+    led_thread1 = threading.Thread(target=led_display_thread_1)
+    led_thread2 = threading.Thread(target=led_display_thread_2)
+    time_update_thread = threading.Thread(target=update_time_thread)
+
+    led_thread1.start()
+    led_thread2.start()
+    time_update_thread.start()
+
+    led_thread1.join()
+    led_thread2.join()
+    time_update_thread.join()
+
+except KeyboardInterrupt:
+    GPIO.cleanup()
